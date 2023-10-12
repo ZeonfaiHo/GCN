@@ -248,12 +248,11 @@ int main(int argc, char **argv) {
     raw_graph_to_AdjacencyList_to_csr();
     edgeNormalization();
 
+    cudaFree(0);
 
     TimePoint start = chrono::steady_clock::now();
 
-    for (int i = 0; i < 100; i++) {
-        GCN();
-    }
+    GCN();
     // Time point at the end of the computation
     TimePoint end = chrono::steady_clock::now();
     chrono::duration<double> l_durationSec = end - start;

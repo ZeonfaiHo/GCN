@@ -17,9 +17,6 @@ int main() {
     cudaMallocHost((void**)&h_A, size_A);
     cudaMallocHost((void**)&h_B, size_B);
     cudaMallocHost((void**)&h_C, size_C);
-    cudaMalloc((void**)&d_A, size_A);
-    cudaMalloc((void**)&d_B, size_B);
-    cudaMalloc((void**)&d_C, size_C);
 
     for(int i = 0; i < DIM_M * DIM_K; i++) {
         h_A[i] = rand() / (float)RAND_MAX;
@@ -27,8 +24,12 @@ int main() {
     for(int i = 0; i < DIM_K * DIM_N; i++) {
         h_B[i] = rand() / (float)RAND_MAX;
     }
-    
+
     auto start = std::chrono::high_resolution_clock::now();
+
+    cudaMalloc((void**)&d_A, size_A);
+    cudaMalloc((void**)&d_B, size_B);
+    cudaMalloc((void**)&d_C, size_C);
 
     cudaMemcpy(d_A, h_A, size_A, cudaMemcpyHostToDevice);
     cudaMemcpy(d_B, h_B, size_B, cudaMemcpyHostToDevice);

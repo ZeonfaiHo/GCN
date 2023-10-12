@@ -203,45 +203,100 @@ float MaxRowSum(float *X, int dim) {
 }
 
 void freeFloats() {
-    free(X0);
-    free(W1);
-    free(X1);
-    free(X1_inter);
-    free(nodes_index);
-    free(edges);
-    free(edges_value);
-    cudaFree(d_X0);
-    cudaFree(d_X1_inter);
-    cudaFree(d_W1);
-    cudaFree(d_X1);
-    cudaFree(d_index);
-    cudaFree(d_edges);
-    cudaFree(d_edges_val);
+    // free(X0);
+    // free(W1);
+    // free(X1);
+    // free(X1_inter);
+    // free(nodes_index);
+    // free(edges);
+    // free(edges_value);
+    // cudaFree(d_X0);
+    // cudaFree(d_X1_inter);
+    // cudaFree(d_W1);
+    // cudaFree(d_X1);
+    // cudaFree(d_index);
+    // cudaFree(d_edges);
+    // cudaFree(d_edges_val);
 }
 
 void initGPUMemory() {
-    cudaMalloc(&d_X0, v_num * F0 * sizeof(float));
+//     cudaMalloc(&d_X0, v_num * F0 * sizeof(float));
+
+//     cudaMemcpy(d_X0, X0, v_num * F0 * sizeof(float), cudaMemcpyHostToDevice);
+
+//     cudaMalloc(&d_X1_inter, v_num * F1 * sizeof(float));
+//     cudaMemcpy(d_X1_inter, X1_inter, v_num * F1 * sizeof(float), cudaMemcpyHostToDevice);
+
+//     cudaMalloc(&d_W1, F0 * F1 * sizeof(float));
+//     cudaMemcpy(d_W1, W1, F0 * F1 * sizeof(float), cudaMemcpyHostToDevice);
+
+//     cudaMalloc(&d_X1, F1 * v_num * sizeof(float));
+//     cudaMemcpy(d_X1, X1, F1 * v_num * sizeof(float), cudaMemcpyHostToDevice);
+
+// //    d_index, d_edge, d_edge_val
+
+//     cudaMalloc(&d_index, (v_num + 1) * sizeof(int));
+//     cudaMemcpy(d_index, nodes_index, (v_num + 1) * sizeof(int), cudaMemcpyHostToDevice);
+
+//     cudaMalloc(&d_edges, e_num * sizeof(int));
+//     cudaMemcpy(d_edges, edges, e_num * sizeof(int), cudaMemcpyHostToDevice);
+
+//     cudaMalloc(&d_edges_val, e_num * sizeof(float));
+//     cudaMemcpy(d_edges_val, edges_value, e_num * sizeof(float), cudaMemcpyHostToDevice);
+
+    // 计算总的内存需求
+    size_t totalSize = v_num * F0 * sizeof(float) + 
+                   v_num * F1 * sizeof(float) + 
+                   F0 * F1 * sizeof(float) + 
+                   F1 * v_num * sizeof(float) + 
+                   (v_num + 1) * sizeof(int) + 
+                   e_num * sizeof(int) + 
+                   e_num * sizeof(float);
+
+    // 分配所需的总内存
+    char *d_mem;
+    cudaMalloc(&d_mem, totalSize);
+
+    printf("%zd\n", totalSize);
+
+    cudaError_t err = cudaGetLastError();
+    // if (err != cudaSuccess) {
+        printf("CUDA error: %s\n", cudaGetErrorString(err));
+    // }
+
+    size_t offset = 0;
+
+    // 使用偏移量设置指针
+    d_X0 = reinterpret_cast<float *>(d_mem + offset);
+    offset += v_num * F0 * sizeof (float);
+
+    d_X1_inter = reinterpret_cast<float *>(d_mem + offset);
+    offset += v_num * F1 * sizeof(float);
+
+    d_W1 = reinterpret_cast<float *>(d_mem + offset);
+    offset += F0 * F1 * sizeof(float);
+
+    d_X1 = reinterpret_cast<float *>(d_mem + offset);
+    offset += F1 * v_num * sizeof(float);
+
+    d_index = reinterpret_cast<int *>(d_mem + offset);
+    offset += (v_num + 1) * sizeof(int);
+
+    d_edges = reinterpret_cast<int *>(d_mem + offset);
+    offset +=  e_num * sizeof(int);
+
+    d_edges_val = reinterpret_cast<float *>(d_mem + offset);
+    offset += e_num * sizeof(float);
+
+    // 进行 cudaMemcpy 操作
     cudaMemcpy(d_X0, X0, v_num * F0 * sizeof(float), cudaMemcpyHostToDevice);
-
-    cudaMalloc(&d_X1_inter, v_num * F1 * sizeof(float));
     cudaMemcpy(d_X1_inter, X1_inter, v_num * F1 * sizeof(float), cudaMemcpyHostToDevice);
-
-    cudaMalloc(&d_W1, F0 * F1 * sizeof(float));
     cudaMemcpy(d_W1, W1, F0 * F1 * sizeof(float), cudaMemcpyHostToDevice);
-
-    cudaMalloc(&d_X1, F1 * v_num * sizeof(float));
     cudaMemcpy(d_X1, X1, F1 * v_num * sizeof(float), cudaMemcpyHostToDevice);
-
-//    d_index, d_edge, d_edge_val
-
-    cudaMalloc(&d_index, (v_num + 1) * sizeof(int));
     cudaMemcpy(d_index, nodes_index, (v_num + 1) * sizeof(int), cudaMemcpyHostToDevice);
-
-    cudaMalloc(&d_edges, e_num * sizeof(int));
     cudaMemcpy(d_edges, edges, e_num * sizeof(int), cudaMemcpyHostToDevice);
-
-    cudaMalloc(&d_edges_val, e_num * sizeof(float));
     cudaMemcpy(d_edges_val, edges_value, e_num * sizeof(float), cudaMemcpyHostToDevice);
+
 }
 
 void Preprocessing() {
@@ -359,12 +414,11 @@ int main(int argc, char **argv) {
     raw_graph_to_AdjacencyList_to_csr();
     edgeNormalization();
 
+    cudaFree(0);
 
     TimePoint start = chrono::steady_clock::now();
 
-    for (int i = 0; i < 100; i++) {
-        GCN();
-    }
+    GCN();
     // Time point at the end of the computation
     TimePoint end = chrono::steady_clock::now();
     chrono::duration<double> l_durationSec = end - start;
@@ -378,5 +432,4 @@ int main(int argc, char **argv) {
     printf("%f\n", l_timeMs);
 
     freeFloats();
-
 }
