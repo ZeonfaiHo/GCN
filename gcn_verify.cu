@@ -99,10 +99,36 @@ __global__ void XW_(int in_dim, int out_dim, float *in_X, float *out_X, float *W
     }
 }
 
-__global__ void AX_(int dim, float *in_X, float *out_X, int *index, int *edges, float *edges_val, int v_num) {
+// __global__ void AX_(int dim, float *in_X, float *out_X, int *index, int *edges, float *edges_val, int v_num) {
+
+//     int tid = threadIdx.x + blockIdx.x * blockDim.x;
+//     if (tid >= v_num) return;
+
+//     int *nbrs = &edges[index[tid]];
+//     float *nbrs_val = &edges_val[index[tid]];
+
+//     int degree = index[tid + 1] - index[tid];
+
+//     for (int j = 0; j < degree; j++) {
+//         int nbr = nbrs[j];
+//         for (int k = 0; k < dim; k++) {
+//             out_X[dim * tid + k] += in_X[nbr * dim + k] * nbrs_val[j];
+//         }
+//     }
+// }
+
+__global__ void LogSoftmax_AX_(int dim, float *in_X, float *out_X, int *index, int *edges, float *edges_val, int v_num) {
 
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= v_num) return;
+
+    extern __shared__ float shared_out_X[];
+
+    // 初始化共享内存
+    for (int k = 0; k < dim; k++) {
+        shared_out_X[k + threadIdx.x * dim] = 0;
+    }
+    __syncthreads();  // 确保所有线程都完成了共享内存的初始化
 
     int *nbrs = &edges[index[tid]];
     float *nbrs_val = &edges_val[index[tid]];
@@ -112,10 +138,34 @@ __global__ void AX_(int dim, float *in_X, float *out_X, int *index, int *edges, 
     for (int j = 0; j < degree; j++) {
         int nbr = nbrs[j];
         for (int k = 0; k < dim; k++) {
-            out_X[dim * tid + k] += in_X[nbr * dim + k] * nbrs_val[j];
+            shared_out_X[k + threadIdx.x * dim] += in_X[nbr * dim + k] * nbrs_val[j];
         }
     }
+    
+    __syncthreads();  // 确保所有线程都完成了数据的计算
+
+    float max_val = shared_out_X[threadIdx.x * dim + 0];
+    for (int j = 1; j < dim; j++) {
+        if (shared_out_X[threadIdx.x * dim + j] > max_val) max_val = shared_out_X[threadIdx.x * dim + j];
+    }
+
+    float sum = 0.0f;
+    for (int j = 0; j < dim; j++) {
+        sum += expf(shared_out_X[threadIdx.x * dim + j] - max_val);
+    }
+    sum = logf(sum);
+
+    for (int j = 0; j < dim; j++) {
+        shared_out_X[threadIdx.x * dim + j] = shared_out_X[threadIdx.x * dim + j] - max_val - sum;
+    }
+
+
+    // 将共享内存的数据写回全局内存
+    for (int k = 0; k < dim; k++) {
+        out_X[dim * tid + k] = shared_out_X[k + threadIdx.x * dim];
+    }
 }
+
 
 // void LogSoftmax(int dim, float *X) {
 
@@ -218,18 +268,36 @@ void Preprocessing() {
 
 }
 
+__global__ void AX_(int dim, float *in_X, float *out_X, int *index, int *edges, float *edges_val, int v_num) {
+
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tid >= v_num) return;
+
+    int *nbrs = &edges[index[tid]];
+    float *nbrs_val = &edges_val[index[tid]];
+
+    int degree = index[tid + 1] - index[tid];
+
+    for (int j = 0; j < degree; j++) {
+        int nbr = nbrs[j];
+        for (int k = 0; k < dim; k++) {
+            out_X[dim * tid + k] += in_X[nbr * dim + k] * nbrs_val[j];
+        }
+    }
+}
+
 __global__ void LogSoftmax(int v_num, int dim, float *X) {
     extern __shared__ float sharedMem[];
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int local_tid = threadIdx.x;
 
     // Load data into shared memory
     for (int j = 0; j < dim; j++) {
-        sharedMem[local_tid * dim + j] = X[i * dim + j];
+        sharedMem[local_tid * dim + j] = X[tid * dim + j];
     }
     // __syncthreads();  // Ensure all threads have loaded data before proceeding
 
-    if (i < v_num) {
+    if (tid < v_num) {
         float max_val = sharedMem[local_tid * dim + 0];
         for (int j = 1; j < dim; j++) {
             if (sharedMem[local_tid * dim + j] > max_val) max_val = sharedMem[local_tid * dim + j];
@@ -242,12 +310,12 @@ __global__ void LogSoftmax(int v_num, int dim, float *X) {
         sum = logf(sum);
 
         for (int j = 0; j < dim; j++) {
-            sharedMem[local_tid * dim + j] -= (max_val + sum);
+            sharedMem[local_tid * dim + j] = sharedMem[local_tid * dim + j] - max_val - sum;
         }
 
         // Store back to global memory
         for (int j = 0; j < dim; j++) {
-            X[i * dim + j] = sharedMem[local_tid * dim + j];
+            X[tid * dim + j] = sharedMem[local_tid * dim + j];
         }
     }
 }
@@ -260,15 +328,17 @@ void GCN() {
     cudaGetDevice(&device);  // 获取当前设备ID
     cudaDeviceProp deviceProp;
     cudaGetDeviceProperties(&deviceProp, device);  // 获取设备属性
-    const int block_size = std::min(deviceProp.maxThreadsPerBlock, 
-                                    static_cast<int>(deviceProp.sharedMemPerBlock / (F1  * sizeof (float))));
-    printf("%d\n", block_size);
+    // const int block_size = std::min(deviceProp.maxThreadsPerBlock, 
+    //                                 static_cast<int>(deviceProp.sharedMemPerBlock / (F1  * sizeof (float))));
+    const int block_size = 64;
+    // printf("%d\n", block_size);
     const int grid_size = v_num / block_size + 1;
 
     XW_<<<grid_size, block_size>>>(F0, F1, d_X0, d_X1_inter, d_W1, v_num);
-    AX_<<<grid_size, block_size>>>(F1, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
-    LogSoftmax<<<grid_size, block_size, block_size * F1 * sizeof (float)>>>(v_num, F1, d_X1);
-    
+    LogSoftmax_AX_<<<grid_size, block_size, block_size * F1 * sizeof (float)>>>(F1, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
+    // AX_<<<grid_size, block_size, block_size * F1 * sizeof (float)>>>(F1, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
+    // LogSoftmax<<<grid_size, block_size, block_size * F1 * sizeof (float)>>>(v_num, F1, d_X1);
+
     cudaMemcpy(X1, d_X1, sizeof(float) * v_num * F1, cudaMemcpyDeviceToHost);
 }
 
@@ -292,7 +362,9 @@ int main(int argc, char **argv) {
 
     TimePoint start = chrono::steady_clock::now();
 
-    GCN();
+    for (int i = 0; i < 100; i++) {
+        GCN();
+    }
     // Time point at the end of the computation
     TimePoint end = chrono::steady_clock::now();
     chrono::duration<double> l_durationSec = end - start;

@@ -251,7 +251,9 @@ int main(int argc, char **argv) {
 
     TimePoint start = chrono::steady_clock::now();
 
-    GCN();
+    for (int i = 0; i < 100; i++) {
+        GCN();
+    }
     // Time point at the end of the computation
     TimePoint end = chrono::steady_clock::now();
     chrono::duration<double> l_durationSec = end - start;
