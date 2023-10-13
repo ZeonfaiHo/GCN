@@ -257,12 +257,12 @@ void initGPUMemory() {
     char *d_mem;
     cudaMalloc(&d_mem, totalSize);
 
-    printf("%zd\n", totalSize);
+    // printf("%zd\n", totalSize);
 
-    cudaError_t err = cudaGetLastError();
-    // if (err != cudaSuccess) {
-        printf("CUDA error: %s\n", cudaGetErrorString(err));
-    // }
+    // cudaError_t err = cudaGetLastError();
+    // // if (err != cudaSuccess) {
+    //     printf("CUDA error: %s\n", cudaGetErrorString(err));
+    // // }
 
     size_t offset = 0;
 
