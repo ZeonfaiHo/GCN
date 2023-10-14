@@ -170,7 +170,7 @@ void freeFloats() {
 #define TILE_WIDTH 16
 #define BLOCK_SIZE 1
 
-__global__ void XW_(int in_dim, int out_dim, float *in_X, float *out_X, float *W, int v_num) {
+__global__ void XW_blockized_(int in_dim, int out_dim, float *in_X, float *out_X, float *W, int v_num) {
     __shared__ float ds_A[TILE_WIDTH][TILE_WIDTH];
     __shared__ float ds_B[TILE_WIDTH][TILE_WIDTH];
 
@@ -209,50 +209,66 @@ __global__ void XW_(int in_dim, int out_dim, float *in_X, float *out_X, float *W
     }
 }
 
+__global__ void logSoftmax_AX_parallalized_(int dim, float *in_X, float *out_X, int *index, int *edges, float *edges_val, int v_num) {
 
-__global__ void LogSoftmax_AX_(int dim, float *in_X, float *out_X, int *index, int *edges, float *edges_val, int v_num) {
+    int vid = blockIdx.x;
+    int tid = threadIdx.x;
 
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if (tid >= v_num) return;
+    if (vid >= v_num) return;
 
-    extern __shared__ float shared_out_X[];
+    extern __shared__ float shared_mem[];
+    float *shared_out_X = shared_mem;
+    shared_out_X[tid] = 0;
 
-    // 初始化共享内存
-    for (int k = 0; k < dim; k++) {
-        shared_out_X[k + threadIdx.x * dim] = 0;
-    }
+    int *nbrs = &edges[index[vid]];
+    float *nbrs_val = &edges_val[index[vid]];
 
-    int *nbrs = &edges[index[tid]];
-    float *nbrs_val = &edges_val[index[tid]];
+    int degree = index[vid + 1] - index[vid];
 
-    int degree = index[tid + 1] - index[tid];
-
+    __syncthreads();
+    
     for (int j = 0; j < degree; j++) {
         int nbr = nbrs[j];
-        for (int k = 0; k < dim; k++) {
-            shared_out_X[k + threadIdx.x * dim] += in_X[nbr * dim + k] * nbrs_val[j];
-        }
+        shared_out_X[tid] += in_X[nbr * dim + tid] * nbrs_val[j];
+
+        __syncthreads();
     }
     
-    float max_val = shared_out_X[threadIdx.x * dim + 0];
-    for (int j = 1; j < dim; j++) {
-        if (shared_out_X[threadIdx.x * dim + j] > max_val) max_val = shared_out_X[threadIdx.x * dim + j];
+    float *partial_max_val = shared_mem + dim * sizeof (float);
+    partial_max_val[tid] = shared_out_X[tid];
+
+    __syncthreads();
+
+    for (int stride = dim / 2; stride > 0; stride /= 2) {
+        if (tid < stride) {
+            partial_max_val[tid] = max(partial_max_val[tid], partial_max_val[tid + stride]);
+        }
+
+        __syncthreads();
     }
 
-    float sum = 0.0f;
-    for (int j = 0; j < dim; j++) {
-        sum += expf(shared_out_X[threadIdx.x * dim + j] - max_val);
+    float max_val = partial_max_val[0];
+
+    float *partial_sum = shared_mem + 2 * dim * sizeof (float);
+    partial_sum[tid] = expf(shared_out_X[tid] - max_val);
+
+    __syncthreads();
+
+    for (int stride = dim / 2; stride > 0; stride /= 2) {
+        if (tid < stride) {
+            partial_sum[tid] += partial_sum[tid + stride];
+        }
+
+        __syncthreads();
     }
+
+    float sum = partial_sum[0];
     sum = logf(sum);
 
-    for (int j = 0; j < dim; j++) {
-        shared_out_X[threadIdx.x * dim + j] = shared_out_X[threadIdx.x * dim + j] - max_val - sum;
-    }
+    shared_out_X[tid] = shared_out_X[tid] - max_val - sum;
 
     // 将共享内存的数据写回全局内存
-    for (int k = 0; k < dim; k++) {
-        out_X[dim * tid + k] = shared_out_X[k + threadIdx.x * dim];
-    }
+    out_X[dim * vid + tid] = shared_out_X[tid];
 }
 
 void freeGPUMemory() {
@@ -263,23 +279,13 @@ void GCN() {
     Preprocessing();
     initGPUMemory();
 
-    int device;
-    cudaGetDevice(&device);  // 获取当前设备ID
-    cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, device);  // 获取设备属性
-    // const int block_size = std::min(deviceProp.maxThreadsPerBlock, 
-    //                                 static_cast<int>(deviceProp.sharedMemPerBlock / (F1  * sizeof (float))));
-    const int block_size = BLOCK_SIZE;
-    // printf("%d\n", block_size);
-    const int grid_size = v_num / block_size + 1;
-
-    XW_<<<dim3(ceil((float)F1 / TILE_WIDTH), ceil((float)v_num / TILE_WIDTH)), 
+    XW_blockized_<<<dim3(ceil((float)F1 / TILE_WIDTH), ceil((float)v_num / TILE_WIDTH)), 
           dim3(TILE_WIDTH, TILE_WIDTH)>>>
        (F0, F1, d_X0, d_X1_inter, d_W1, v_num);
     
-    LogSoftmax_AX_<<<grid_size, 
-                     block_size, 
-                     block_size * F1 * sizeof (float)>>>
+    logSoftmax_AX_parallalized_<<<v_num, 
+                     F1, 
+                     3 * F1 * sizeof (float)>>>
                   (F1, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
 
     cudaMemcpy(X1, d_X1, sizeof(float) * v_num * F1, cudaMemcpyDeviceToHost);

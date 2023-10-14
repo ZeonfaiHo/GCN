@@ -81,7 +81,7 @@ void initFloat(float *&dst, int num) {
     memset(dst, 0, num * sizeof(float));
 }
 
-__global__ void XW_(int in_dim, int out_dim, float *in_X, float *out_X, float *W, int v_num) {
+__global__ void XW_blockized_(int in_dim, int out_dim, float *in_X, float *out_X, float *W, int v_num) {
 
     int tid = threadIdx.x + blockIdx.x * blockDim.x; //控制v_vum
 
@@ -222,7 +222,7 @@ void GCN() {
     initGPUMemory();
     const int block_size = 512;
     const int grid_size = v_num / block_size + 1;
-    XW_<<<grid_size, block_size>>>(F0, F1, d_X0, d_X1_inter, d_W1, v_num);
+    XW_blockized_<<<grid_size, block_size>>>(F0, F1, d_X0, d_X1_inter, d_W1, v_num);
     cudaMemcpy(X1_inter, d_X1_inter, v_num * F1 * sizeof(float), cudaMemcpyDeviceToHost);
 
     AX_<<<grid_size, block_size>>>(F1, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
