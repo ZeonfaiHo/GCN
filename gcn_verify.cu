@@ -293,6 +293,9 @@ void GCN() {
                   (F1, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
 
     cudaMemcpy(X1, d_X1, sizeof(float) * v_num * F1, cudaMemcpyDeviceToHost);
+
+    cudaStreamDestroy(memcpy_stream_X0W);
+    cudaStreamDestroy(memcpy_stream_graph);
     
     freeGPUMemory();
     freeCPUMemory();
