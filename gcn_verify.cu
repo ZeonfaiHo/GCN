@@ -295,6 +295,7 @@ void GCN() {
     cudaMemcpy(X1, d_X1, sizeof(float) * v_num * F1, cudaMemcpyDeviceToHost);
     
     freeGPUMemory();
+    freeCPUMemory();
 }
 
 float MaxRowSum(float *X, int dim) {
