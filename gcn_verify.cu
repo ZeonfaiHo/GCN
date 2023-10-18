@@ -86,12 +86,12 @@ void initFloat(float *&dst, int num) {
 void initGPUMemory() {
     // 计算总的内存需求
     size_t totalSize = v_num * F0 * sizeof(float) + 
-                   v_num * F1 * sizeof(float) + 
                    F0 * F1 * sizeof(float) + 
-                   F1 * v_num * sizeof(float) + 
+                   v_num * F1 * sizeof(float) + 
                    (v_num + 1) * sizeof(int) + 
                    e_num * sizeof(int) + 
-                   e_num * sizeof(float);
+                   e_num * sizeof(float) + 
+                   v_num * F1 * sizeof(float);
 
     // 分配所需的总内存
     cudaMalloc(&d_mem, totalSize);
@@ -104,14 +104,11 @@ void initGPUMemory() {
     d_X0 = reinterpret_cast<float *>(d_mem + offset);
     offset += v_num * F0 * sizeof (float);
 
-    d_X1_inter = reinterpret_cast<float *>(d_mem + offset);
-    offset += v_num * F1 * sizeof(float);
-
     d_W1 = reinterpret_cast<float *>(d_mem + offset);
     offset += F0 * F1 * sizeof(float);
 
-    d_X1 = reinterpret_cast<float *>(d_mem + offset);
-    offset += F1 * v_num * sizeof(float);
+    d_X1_inter = reinterpret_cast<float *>(d_mem + offset);
+    offset += v_num * F1 * sizeof(float);
 
     d_index = reinterpret_cast<int *>(d_mem + offset);
     offset += (v_num + 1) * sizeof(int);
@@ -122,20 +119,13 @@ void initGPUMemory() {
     d_edges_val = reinterpret_cast<float *>(d_mem + offset);
     offset += e_num * sizeof(float);
 
-    // 进行 cudaMemcpy 操作
-    cudaMemcpy(d_X0, X0, v_num * F0 * sizeof(float), cudaMemcpyHostToDevice);
-    // cudaMemcpy(d_X1_inter, X1_inter, v_num * F1 * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_W1, W1, F0 * F1 * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_X1, X1, F1 * v_num * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_index, nodes_index, (v_num + 1) * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_edges, edges, e_num * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_edges_val, edges_value, e_num * sizeof(float), cudaMemcpyHostToDevice);
-
+    d_X1 = reinterpret_cast<float *>(d_mem + offset);
+    offset += v_num * F1 * sizeof(float);
 }
 
 void Preprocessing() {
 
-    nodes_index = (int *) malloc(v_num * sizeof(int) + 1);
+    nodes_index = (int *) malloc((v_num + 1) * sizeof(int));
 
     int sum = 0;
     for (int i = 0; i < v_num; i++) {
@@ -155,16 +145,6 @@ void Preprocessing() {
     }
 
 
-}
-
-void freeFloats() {
-    free(X0);
-    free(W1);
-    free(X1);
-    free(X1_inter);
-    free(nodes_index);
-    free(edges);
-    free(edges_value);
 }
 
 #define TILE_WIDTH 16
@@ -275,13 +255,37 @@ void freeGPUMemory() {
     cudaFree(d_mem);
 }
 
+void freeCPUMemory() {
+    free(nodes_index);
+    free(edges);
+    free(edges_value);
+}
+
 void GCN() {
-    Preprocessing();
     initGPUMemory();
+
+    cudaStream_t memcpy_stream_X0W;
+    cudaStreamCreate(&memcpy_stream_X0W);
+
+    cudaMemcpyAsync(d_X0, X0, v_num * F0 * sizeof(float), cudaMemcpyHostToDevice, memcpy_stream_X0W);
+    cudaMemcpyAsync(d_W1, W1, F0 * F1 * sizeof(float), cudaMemcpyHostToDevice, memcpy_stream_X0W);
+   
+    Preprocessing(); 
+
+    cudaStream_t memcpy_stream_graph;
+    cudaStreamCreate(&memcpy_stream_graph);
+    
+    cudaMemcpyAsync(d_index, nodes_index, (v_num + 1) * sizeof(int), cudaMemcpyHostToDevice, memcpy_stream_graph);
+    cudaMemcpyAsync(d_edges, edges, e_num * sizeof(int), cudaMemcpyHostToDevice, memcpy_stream_graph);
+    cudaMemcpyAsync(d_edges_val, edges_value, e_num * sizeof(float), cudaMemcpyHostToDevice, memcpy_stream_graph);
+
+    cudaStreamSynchronize(memcpy_stream_X0W);
 
     XW_blockized_<<<dim3(ceil((float)F1 / TILE_WIDTH), ceil((float)v_num / TILE_WIDTH)), 
           dim3(TILE_WIDTH, TILE_WIDTH)>>>
        (F0, F1, d_X0, d_X1_inter, d_W1, v_num);
+
+    cudaStreamSynchronize(memcpy_stream_graph);
     
     logSoftmax_AX_parallalized_<<<v_num, 
                      F1, 
@@ -305,6 +309,13 @@ float MaxRowSum(float *X, int dim) {
         if (sum > max) max = sum;
     }
     return max;
+}
+
+void freeFloats() {
+    free(X0);
+    free(W1);
+    free(X1);
+    free(X1_inter);
 }
 
 int main(int argc, char **argv) {
