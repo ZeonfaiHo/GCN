@@ -264,38 +264,41 @@ void freeCPUMemory() {
 void GCN() {
     initGPUMemory();
 
-    cudaStream_t memcpy_stream_X0W;
-    cudaStreamCreate(&memcpy_stream_X0W);
+    cudaStream_t stream_X0W;
+    cudaStreamCreate(&stream_X0W);
 
-    cudaMemcpyAsync(d_X0, X0, v_num * F0 * sizeof(float), cudaMemcpyHostToDevice, memcpy_stream_X0W);
-    cudaMemcpyAsync(d_W1, W1, F0 * F1 * sizeof(float), cudaMemcpyHostToDevice, memcpy_stream_X0W);
+    cudaMemcpyAsync(d_X0, X0, v_num * F0 * sizeof(float), cudaMemcpyHostToDevice, stream_X0W);
+    cudaMemcpyAsync(d_W1, W1, F0 * F1 * sizeof(float), cudaMemcpyHostToDevice, stream_X0W);
+
+    XW_blockized_<<<dim3(ceil((float)F1 / TILE_WIDTH), ceil((float)v_num / TILE_WIDTH)), 
+          dim3(TILE_WIDTH, TILE_WIDTH),
+          0,
+          stream_X0W>>>
+       (F0, F1, d_X0, d_X1_inter, d_W1, v_num);
    
     Preprocessing(); 
 
-    cudaStream_t memcpy_stream_graph;
-    cudaStreamCreate(&memcpy_stream_graph);
+    cudaStream_t stream_graph;
+    cudaStreamCreate(&stream_graph);
     
-    cudaMemcpyAsync(d_index, nodes_index, (v_num + 1) * sizeof(int), cudaMemcpyHostToDevice, memcpy_stream_graph);
-    cudaMemcpyAsync(d_edges, edges, e_num * sizeof(int), cudaMemcpyHostToDevice, memcpy_stream_graph);
-    cudaMemcpyAsync(d_edges_val, edges_value, e_num * sizeof(float), cudaMemcpyHostToDevice, memcpy_stream_graph);
+    cudaMemcpyAsync(d_index, nodes_index, (v_num + 1) * sizeof(int), cudaMemcpyHostToDevice, stream_graph);
+    cudaMemcpyAsync(d_edges, edges, e_num * sizeof(int), cudaMemcpyHostToDevice, stream_graph);
+    cudaMemcpyAsync(d_edges_val, edges_value, e_num * sizeof(float), cudaMemcpyHostToDevice, stream_graph);
 
-    cudaStreamSynchronize(memcpy_stream_X0W);
+    cudaStreamSynchronize(stream_X0W);
 
-    XW_blockized_<<<dim3(ceil((float)F1 / TILE_WIDTH), ceil((float)v_num / TILE_WIDTH)), 
-          dim3(TILE_WIDTH, TILE_WIDTH)>>>
-       (F0, F1, d_X0, d_X1_inter, d_W1, v_num);
-
-    cudaStreamSynchronize(memcpy_stream_graph);
-    
     logSoftmax_AX_parallalized_<<<v_num, 
                      F1, 
-                     3 * F1 * sizeof (float)>>>
+                     3 * F1 * sizeof (float),
+                     stream_graph>>>
                   (F1, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
+    
+    cudaStreamSynchronize(stream_graph);
 
     cudaMemcpy(X1, d_X1, sizeof(float) * v_num * F1, cudaMemcpyDeviceToHost);
 
-    cudaStreamDestroy(memcpy_stream_X0W);
-    cudaStreamDestroy(memcpy_stream_graph);
+    cudaStreamDestroy(stream_X0W);
+    cudaStreamDestroy(stream_graph);
     
     freeGPUMemory();
     freeCPUMemory();
