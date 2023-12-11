@@ -775,7 +775,14 @@ double GCN()
 
     // threads_per_node = 16;
 
-    nodes_per_block = 1024 / 16 / threads_per_node;
+    // nodes_per_block = 1024 / 16 / threads_per_node;
+    if (avg_edge_per_node > 10 ) {
+        nodes_per_block = 4;
+    // } else if (avg_edge_per_node > 7) {
+    //     nodes_per_block = 1;
+    } else {
+        nodes_per_block = 2;
+    }
     
     // logSoftmax_AX_better_<<<(v_num + nodes_per_block - 1) / nodes_per_block, dim3(16, threads_per_node, nodes_per_block), nodes_per_block * 3 * 16 * sizeof (double)>>>(16, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
 
@@ -795,7 +802,6 @@ double GCN()
     // // 开始计时
     // auto postprocess_start = std::chrono::high_resolution_clock::now();
 
-    // 需要计时的代码段
     double mx = -__FLT_MAX__;
     int idx = 0;
     
