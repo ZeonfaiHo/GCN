@@ -3,3 +3,4 @@ weight/**
 embedding/**
 *.nsys-rep
 *.sqlite
+*.json

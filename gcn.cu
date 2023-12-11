@@ -411,9 +411,6 @@ __global__ void logSoftmax_AX_(int dim, double *in_X, double *out_X, int *index,
     out_X[dim * bx + tx] = shared_out_X[tx];
 }
 
-#define THREADS_PER_NODE 4
-#define NODES_PER_BLOCK 16
-
 __global__ void 
 __launch_bounds__(1024)
 logSoftmax_AX_better_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num) {
@@ -425,13 +422,17 @@ logSoftmax_AX_better_(int dim, double *in_X, double *out_X, int *index, int *edg
     int ty = threadIdx.y;
     int tz = threadIdx.z;
 
-    int vid = bx * THREADS_PER_NODE + tz;
+    int threads_per_node = blockDim.y;
+    int nodes_per_block = blockDim.z;
+
+    int vid = bx * nodes_per_block + tz;
 
     if (vid >= v_num) return;
 
-    __shared__ char shared_mem[THREADS_PER_NODE][3 * 16 * sizeof (double)];
+    // __shared__ char shared_mem[THREADS_PER_NODE][3 * 16 * sizeof (double)];
+    extern __shared__ char shared_mem[];
     
-    double *shared_out_X = (double*) shared_mem[tz];
+    double *shared_out_X = (double*) (shared_mem + tz * 3 * 16 * sizeof (double));
     if (ty == 0) {
         shared_out_X[tx] = 0;
     }
@@ -443,7 +444,7 @@ logSoftmax_AX_better_(int dim, double *in_X, double *out_X, int *index, int *edg
 
     int degree = index[vid + 1] - index[vid];
 
-    for (int j = ty; j < degree; j += NODES_PER_BLOCK) {
+    for (int j = ty; j < degree; j += threads_per_node) {
         int nbr = nbrs[j];
         double x = in_X[nbr * 16 + tx];
         double y = nbrs_val[j];
@@ -487,7 +488,7 @@ logSoftmax_AX_better_(int dim, double *in_X, double *out_X, int *index, int *edg
 
     __syncthreads();
 
-    double *partial_max_val = (double*) (shared_mem[tz] + 16 * sizeof (double));
+    double *partial_max_val = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 16 * sizeof (double));
     partial_max_val[tx] = shared_out_X[tx];
 
     for (int stride = 16 / 2; stride > 0; stride /= 2) {
@@ -500,7 +501,7 @@ logSoftmax_AX_better_(int dim, double *in_X, double *out_X, int *index, int *edg
 
     double max_val = partial_max_val[0];
 
-    double *partial_sum = (double*) (shared_mem[tz] + 2 * 16 * sizeof (double));
+    double *partial_sum = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 2 * 16 * sizeof (double));
     partial_sum[tx] = exp(shared_out_X[tx] - max_val);
 
     __syncthreads();
@@ -520,6 +521,125 @@ logSoftmax_AX_better_(int dim, double *in_X, double *out_X, int *index, int *edg
 
     // 将共享内存的数据写回全局内存
     out_X[16 * vid + tx] = shared_out_X[tx];
+}
+
+__global__ void 
+__launch_bounds__(1024)
+logSoftmax_AX_better_rowsum_trick_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num) {
+    assert(dim == 16);
+
+    int bx = blockIdx.x;
+
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int tz = threadIdx.z;
+
+    int threads_per_node = blockDim.y;
+    int nodes_per_block = blockDim.z;
+
+    int vid = bx * nodes_per_block + tz;
+
+    if (vid >= v_num) return;
+
+    // __shared__ char shared_mem[THREADS_PER_NODE][3 * 16 * sizeof (double)];
+    extern __shared__ char shared_mem[];
+    
+    double *shared_out_X = (double*) (shared_mem + tz * 3 * 16 * sizeof (double));
+    if (ty == 0) {
+        shared_out_X[tx] = 0;
+    }
+    
+    __syncthreads();
+
+    int *nbrs = &edges[index[vid]];
+    double *nbrs_val = &edges_val[index[vid]];
+
+    int degree = index[vid + 1] - index[vid];
+
+    for (int j = ty; j < degree; j += threads_per_node) {
+        int nbr = nbrs[j];
+        double x = in_X[nbr * 16 + tx];
+        double y = nbrs_val[j];
+        atomicAdd(&(shared_out_X[tx]), x * y);
+    }
+    
+    // if (ty) {
+    //     return;
+    // }
+
+    // __syncthreads();
+
+    // double max_val = shared_out_X[tx];
+    // for (int i = 0; i < 16; i++) {
+    //     max_val = shared_out_X[i] > max_val ? shared_out_X[i] : max_val;
+    // }
+
+    // __syncthreads();
+
+    // double *shared_out_X_exp = (double*) (shared_mem[tz] + 16 * sizeof (double));
+
+    // shared_out_X_exp[tx] = exp(shared_out_X[tx] - max_val);
+
+    // __syncthreads();
+
+    // double sum = 0;
+    // for (int i = 0; i < 16; i++) {
+    //     sum += shared_out_X_exp[i];
+    // }
+    // sum = log(sum);
+    
+    // shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
+
+    // out_X[16 * vid + tx] = shared_out_X[tx];
+    
+    // ==========
+
+    if (ty) {
+        return;
+    }
+
+    __syncthreads();
+
+    double *partial_max_val = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 16 * sizeof (double));
+    partial_max_val[tx] = shared_out_X[tx];
+
+    for (int stride = 16 / 2; stride > 0; stride /= 2) {
+        if (tx < stride) {
+            partial_max_val[tx] = max(partial_max_val[tx], partial_max_val[tx + stride]);
+        }
+
+        __syncthreads();
+    }
+
+    double max_val = partial_max_val[0];
+
+    double *partial_sum = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 2 * 16 * sizeof (double));
+    partial_sum[tx] = exp(shared_out_X[tx] - max_val);
+
+    __syncthreads();
+
+    for (int stride = 16 / 2; stride > 0; stride /= 2) {
+        if (tx < stride) {
+            partial_sum[tx] += partial_sum[tx + stride];
+        }
+
+        __syncthreads();
+    }
+
+    double sum = partial_sum[0];
+    sum = log(sum);
+
+    shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
+
+    __syncthreads();
+
+    if (tx == 0) {
+        sum = 0;
+        for (int i = 0; i < 16; i++) {
+            sum += shared_out_X[i];
+        }
+        out_X[vid] = sum;
+    }
 }
 
 void LogSoftmax(int dim, double *X)
@@ -622,6 +742,8 @@ double GCN()
     // cudaMemset(d_X1, 0, F1 * v_num * sizeof(double));
 
     TimePoint start = chrono::steady_clock::now();
+
+    // ==========
     // const int block_size = 512;
     // const int grid_size = v_num / block_size + 1;
 
@@ -639,11 +761,59 @@ double GCN()
     // logSoftmax_AX_<<<v_num, 
     //                  dim3(16, 8)
     //               >>>(16, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
+
+    int n_edge = nodes_index[v_num];
+    double avg_edge_per_node = (double) n_edge / v_num;
     
-    logSoftmax_AX_better_<<<(v_num + THREADS_PER_NODE - 1) / THREADS_PER_NODE, 
-                     dim3(16, NODES_PER_BLOCK, THREADS_PER_NODE)
-                     >>>(16, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
+    int nodes_per_block, threads_per_node;
+
+    if (avg_edge_per_node > 10) {
+        threads_per_node = 16;
+    } else {
+        threads_per_node = 2;
+    }
+
+    // threads_per_node = 16;
+
+    nodes_per_block = 1024 / 16 / threads_per_node;
     
+    // logSoftmax_AX_better_<<<(v_num + nodes_per_block - 1) / nodes_per_block, dim3(16, threads_per_node, nodes_per_block), nodes_per_block * 3 * 16 * sizeof (double)>>>(16, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
+
+    logSoftmax_AX_better_rowsum_trick_<<<(v_num + nodes_per_block - 1) / nodes_per_block, dim3(16, threads_per_node, nodes_per_block), nodes_per_block * 3 * 16 * sizeof (double)>>>(16, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
+
+
+    for (int i = 0; i < v_num; i++) {
+        for (int j = 0; j < 16; j++) {
+            X1[i * 16 + j] = j == 0 ? -1e9 : 0;
+        }
+    }
+
+    static double *temp = new double[v_num];
+
+    cudaMemcpy(temp, d_X1, sizeof (double) * v_num, cudaMemcpyDeviceToHost);
+
+    // // 开始计时
+    // auto postprocess_start = std::chrono::high_resolution_clock::now();
+
+    // 需要计时的代码段
+    double mx = -__FLT_MAX__;
+    int idx = 0;
+    
+    for (int i = 0; i < v_num; i++) {
+        if (temp[i] > mx) {
+            mx = temp[i];
+            idx = i;
+        }
+    }
+    X1[16 * idx] = mx;
+
+    // // 结束计时
+    // auto postprocess_end = std::chrono::high_resolution_clock::now();
+
+    // // 计算持续时间
+    // std::chrono::duration<double, std::milli> duration = postprocess_end - postprocess_start;
+    // printf("%lf\n", duration.count());
+
     // cudaError_t error = cudaGetLastError();
     // if (error != cudaSuccess)
     // {
@@ -657,7 +827,7 @@ double GCN()
     // printf("Maximum threads per block: %d\n", prop.maxThreadsPerBlock);
 
     
-    cudaMemcpy(X1, d_X1, sizeof (double) * v_num * 16, cudaMemcpyDeviceToHost);
+    // cudaMemcpyAsync(X1, d_X1, sizeof (double) * v_num * 16, cudaMemcpyDeviceToHost);
 
     // cudaStream_t stream_0;
     // cudaStreamCreate(&stream_0);
@@ -694,6 +864,8 @@ double GCN()
 
     // cudaStreamDestroy(stream_0);
     // cudaStreamDestroy(stream_1);
+
+    // ==========
 
     TimePoint end = chrono::steady_clock::now();
     chrono::duration<double> l_durationSec = end - start;
