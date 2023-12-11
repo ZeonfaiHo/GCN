@@ -1,0 +1,5 @@
+graph/**
+weight/**
+embedding/**
+*.nsys-rep
+*.sqlite
