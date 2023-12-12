@@ -118,26 +118,26 @@ void initdouble(double *&dst, int num)
     memset(dst, 0, num * sizeof(double));
 }
 
-__global__ void XW_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, int v_num)
-{
+// __global__ void XW_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, int v_num)
+// {
 
-    int tid = threadIdx.x + blockIdx.x * blockDim.x; // 控制v_vum
+//     int tid = threadIdx.x + blockIdx.x * blockDim.x; // 控制v_vum
 
-    if (tid >= v_num)
-        return;
+//     if (tid >= v_num)
+//         return;
 
-    double *tmp_in_X = in_X;
-    double *tmp_out_X = out_X;
-    double *tmp_W = W;
+//     double *tmp_in_X = in_X;
+//     double *tmp_out_X = out_X;
+//     double *tmp_W = W;
 
-    for (int j = 0; j < out_dim; j++)
-    {
-        for (int k = 0; k < in_dim; k++)
-        {
-            tmp_out_X[tid * out_dim + j] += tmp_in_X[tid * in_dim + k] * tmp_W[k * out_dim + j];
-        }
-    }
-}
+//     for (int j = 0; j < out_dim; j++)
+//     {
+//         for (int k = 0; k < in_dim; k++)
+//         {
+//             tmp_out_X[tid * out_dim + j] += tmp_in_X[tid * in_dim + k] * tmp_W[k * out_dim + j];
+//         }
+//     }
+// }
 
 #define TILE_WIDTH 16
 
@@ -185,343 +185,343 @@ XW_blockized_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, i
     }
 }
 
-#define TILES_PER_BLOCK 1
+// #define TILES_PER_BLOCK 1
 
-__global__ void
-__launch_bounds__(1024)
-XW_blockized_better_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, int v_num) {
+// __global__ void
+// __launch_bounds__(1024)
+// XW_blockized_better_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, int v_num) {
     
-    assert(out_dim == 16);
+//     assert(out_dim == 16);
     
-    __shared__ double ds_A[TILES_PER_BLOCK][TILE_WIDTH][TILE_WIDTH];
-    __shared__ double ds_B[TILES_PER_BLOCK][TILE_WIDTH][TILE_WIDTH];
+//     __shared__ double ds_A[TILES_PER_BLOCK][TILE_WIDTH][TILE_WIDTH];
+//     __shared__ double ds_B[TILES_PER_BLOCK][TILE_WIDTH][TILE_WIDTH];
 
-    int bx = blockIdx.x, by = blockIdx.y;
-    int tx = threadIdx.x, ty = threadIdx.y;
-    int tz = threadIdx.z;
+//     int bx = blockIdx.x, by = blockIdx.y;
+//     int tx = threadIdx.x, ty = threadIdx.y;
+//     int tz = threadIdx.z;
 
-    int row = by * TILE_WIDTH + ty;
-    int col = bx * TILE_WIDTH + tx;
+//     int row = by * TILE_WIDTH + ty;
+//     int col = bx * TILE_WIDTH + tx;
 
-    double tmp = 0.0;
+//     double tmp = 0.0;
 
-    for (int ph = tz; ph < (in_dim + TILE_WIDTH - 1) / TILE_WIDTH; ph += TILES_PER_BLOCK) {
-        if (row < v_num && ph * TILE_WIDTH + tx < in_dim) {
-            ds_A[tz][ty][tx] = in_X[row * in_dim + ph * TILE_WIDTH + tx];
-        } else {
-            ds_A[tz][ty][tx] = 0.0;
-        }
+//     for (int ph = tz; ph < (in_dim + TILE_WIDTH - 1) / TILE_WIDTH; ph += TILES_PER_BLOCK) {
+//         if (row < v_num && ph * TILE_WIDTH + tx < in_dim) {
+//             ds_A[tz][ty][tx] = in_X[row * in_dim + ph * TILE_WIDTH + tx];
+//         } else {
+//             ds_A[tz][ty][tx] = 0.0;
+//         }
 
-        if (ph * TILE_WIDTH + ty < in_dim && col < out_dim) {
-            ds_B[tz][ty][tx] = W[(ph * TILE_WIDTH + ty) * out_dim + col];
-        } else {
-            ds_B[tz][ty][tx] = 0.0;
-        }
+//         if (ph * TILE_WIDTH + ty < in_dim && col < out_dim) {
+//             ds_B[tz][ty][tx] = W[(ph * TILE_WIDTH + ty) * out_dim + col];
+//         } else {
+//             ds_B[tz][ty][tx] = 0.0;
+//         }
 
-        __syncthreads();
+//         __syncthreads();
 
-        for (int k = 0; k < TILE_WIDTH; k++) {
-            tmp += ds_A[tz][ty][k] * ds_B[tz][k][tx];
-        }
+//         for (int k = 0; k < TILE_WIDTH; k++) {
+//             tmp += ds_A[tz][ty][k] * ds_B[tz][k][tx];
+//         }
 
-        __syncthreads();
-    }
+//         __syncthreads();
+//     }
 
-    __shared__ double ds_O[TILE_WIDTH][TILE_WIDTH];
-    ds_O[ty][tx] = 0;
-    __syncthreads();
+//     __shared__ double ds_O[TILE_WIDTH][TILE_WIDTH];
+//     ds_O[ty][tx] = 0;
+//     __syncthreads();
 
-    atomicAdd(&(ds_O[ty][tx]), tmp);
+//     atomicAdd(&(ds_O[ty][tx]), tmp);
 
-    __syncthreads();
+//     __syncthreads();
 
-    if (row < v_num && col < out_dim && tz == 0) {
-        out_X[row * out_dim + col] = ds_O[ty][tx];
-    }
-}
+//     if (row < v_num && col < out_dim && tz == 0) {
+//         out_X[row * out_dim + col] = ds_O[ty][tx];
+//     }
+// }
 
-#define OFFSET(row, col, ld) ((row) * (ld) + (col))
+// #define OFFSET(row, col, ld) ((row) * (ld) + (col))
 
-#define BM 8
-#define BN 8
-#define BK 8
-#define TM 8
-#define TN 8
+// #define BM 8
+// #define BN 8
+// #define BK 8
+// #define TM 8
+// #define TN 8
 
-__global__ void sgemm_V1(
-    double * __restrict__ a, double * __restrict__ b, double * __restrict__ c,
-    const int M, const int N, const int K) {
+// __global__ void sgemm_V1(
+//     double * __restrict__ a, double * __restrict__ b, double * __restrict__ c,
+//     const int M, const int N, const int K) {
 
-    const int bx = blockIdx.x;
-    const int by = blockIdx.y;
-    const int tx = threadIdx.x;
-    const int ty = threadIdx.y;
-    const int tid = ty * blockDim.x + tx;
+//     const int bx = blockIdx.x;
+//     const int by = blockIdx.y;
+//     const int tx = threadIdx.x;
+//     const int ty = threadIdx.y;
+//     const int tid = ty * blockDim.x + tx;
 
-    __shared__ double s_a[BM][BK];
-    __shared__ double s_b[BK][BN];
+//     __shared__ double s_a[BM][BK];
+//     __shared__ double s_b[BK][BN];
 
-    double r_c[TM][TN] = {0.0};
+//     double r_c[TM][TN] = {0.0};
 
-    int load_a_smem_m = tid >> 1;  // tid/2, row of s_a
-    int load_a_smem_k = (tid & 1) << 2;  // (tid % 2 == 0) ? 0 : 4, col of s_a
-    int load_b_smem_k = tid >> 5;   // tid/32, row of s_b
-    int load_b_smem_n = (tid & 31) << 2;  // (tid % 32) * 4, col of s_b
+//     int load_a_smem_m = tid >> 1;  // tid/2, row of s_a
+//     int load_a_smem_k = (tid & 1) << 2;  // (tid % 2 == 0) ? 0 : 4, col of s_a
+//     int load_b_smem_k = tid >> 5;   // tid/32, row of s_b
+//     int load_b_smem_n = (tid & 31) << 2;  // (tid % 32) * 4, col of s_b
 
-    int load_a_gmem_m = by * BM + load_a_smem_m;  // global row of a
-    int load_b_gmem_n = bx * BN + load_b_smem_n;  // global col of b
+//     int load_a_gmem_m = by * BM + load_a_smem_m;  // global row of a
+//     int load_b_gmem_n = bx * BN + load_b_smem_n;  // global col of b
 
-    for (int bk = 0; bk < (K + BK - 1) / BK; bk++) {
-        for (int i = 0; i < 4; i++) {
-            int load_a_gmem_k = bk * BK + load_a_smem_k + i;   // global col of a
-            int load_a_gmem_addr = OFFSET(load_a_gmem_m, load_a_gmem_k, K);
-            s_a[load_a_smem_m][load_a_smem_k + i] = a[load_a_gmem_addr];
+//     for (int bk = 0; bk < (K + BK - 1) / BK; bk++) {
+//         for (int i = 0; i < 4; i++) {
+//             int load_a_gmem_k = bk * BK + load_a_smem_k + i;   // global col of a
+//             int load_a_gmem_addr = OFFSET(load_a_gmem_m, load_a_gmem_k, K);
+//             s_a[load_a_smem_m][load_a_smem_k + i] = a[load_a_gmem_addr];
 
-            int load_b_gmem_k = bk * BK + load_b_smem_k;   // global row of b
-            int load_b_gmem_addr = OFFSET(load_b_gmem_k, load_b_gmem_n + i, N);
-            s_b[load_b_smem_k][load_b_smem_n + i] = b[load_b_gmem_addr];
-        }
+//             int load_b_gmem_k = bk * BK + load_b_smem_k;   // global row of b
+//             int load_b_gmem_addr = OFFSET(load_b_gmem_k, load_b_gmem_n + i, N);
+//             s_b[load_b_smem_k][load_b_smem_n + i] = b[load_b_gmem_addr];
+//         }
 
-        __syncthreads();
+//         __syncthreads();
 
-        #pragma unroll
-        for (int k = 0; k < BK; k++) {
-            #pragma unroll
-            for (int m = 0; m < TM; m++) {
-                #pragma unroll
-                for (int n = 0; n < TN; n++) {
-                    int comp_a_smem_m = ty * TM + m;
-                    int comp_b_smem_n = tx * TN + n;
-                    r_c[m][n] += s_a[comp_a_smem_m][k] * s_b[k][comp_b_smem_n];
-                }
-            }
-        }
+//         #pragma unroll
+//         for (int k = 0; k < BK; k++) {
+//             #pragma unroll
+//             for (int m = 0; m < TM; m++) {
+//                 #pragma unroll
+//                 for (int n = 0; n < TN; n++) {
+//                     int comp_a_smem_m = ty * TM + m;
+//                     int comp_b_smem_n = tx * TN + n;
+//                     r_c[m][n] += s_a[comp_a_smem_m][k] * s_b[k][comp_b_smem_n];
+//                 }
+//             }
+//         }
 
-        __syncthreads();
-    }
+//         __syncthreads();
+//     }
 
-    #pragma unroll
-    for (int i = 0; i < TM; i++) {
-        int store_c_gmem_m = by * BM + ty * TM + i;
-        #pragma unroll
-        for (int j = 0; j < TN; j++) {
-            int store_c_gmem_n = bx * BN + tx * TN + j;
-            int store_c_gmem_addr = OFFSET(store_c_gmem_m, store_c_gmem_n, N);
-            c[store_c_gmem_addr] = r_c[i][j];
-        }
-    }
-}
+//     #pragma unroll
+//     for (int i = 0; i < TM; i++) {
+//         int store_c_gmem_m = by * BM + ty * TM + i;
+//         #pragma unroll
+//         for (int j = 0; j < TN; j++) {
+//             int store_c_gmem_n = bx * BN + tx * TN + j;
+//             int store_c_gmem_addr = OFFSET(store_c_gmem_m, store_c_gmem_n, N);
+//             c[store_c_gmem_addr] = r_c[i][j];
+//         }
+//     }
+// }
 
-void gemm(double * A, double *B, double *O, const int M, const int N, const int K) {
-    dim3 blockDim(BN / TN, BM / TM);
-    dim3 gridDim((N + BN - 1) / BN, (M + BM - 1) / BM);
+// void gemm(double * A, double *B, double *O, const int M, const int N, const int K) {
+//     dim3 blockDim(BN / TN, BM / TM);
+//     dim3 gridDim((N + BN - 1) / BN, (M + BM - 1) / BM);
 
-    sgemm_V1<<<gridDim, blockDim>>>(A, B, O, M, N, K);
-}
+//     sgemm_V1<<<gridDim, blockDim>>>(A, B, O, M, N, K);
+// }
 
 
-__global__ void AX_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num)
-{
+// __global__ void AX_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num)
+// {
 
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if (tid >= v_num)
-        return;
+//     int tid = threadIdx.x + blockIdx.x * blockDim.x;
+//     if (tid >= v_num)
+//         return;
 
-    int *nbrs = &edges[index[tid]];
-    double *nbrs_val = &edges_val[index[tid]];
+//     int *nbrs = &edges[index[tid]];
+//     double *nbrs_val = &edges_val[index[tid]];
 
-    int degree = index[tid + 1] - index[tid];
+//     int degree = index[tid + 1] - index[tid];
 
-    for (int j = 0; j < degree; j++)
-    {
-        int nbr = nbrs[j];
-        for (int k = 0; k < dim; k++)
-        {
-            out_X[dim * tid + k] += in_X[nbr * dim + k] * nbrs_val[j];
-        }
-    }
-}
+//     for (int j = 0; j < degree; j++)
+//     {
+//         int nbr = nbrs[j];
+//         for (int k = 0; k < dim; k++)
+//         {
+//             out_X[dim * tid + k] += in_X[nbr * dim + k] * nbrs_val[j];
+//         }
+//     }
+// }
 
-__global__ void logSoftmax_AX_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num) {
-    assert(dim == 16);
+// __global__ void logSoftmax_AX_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num) {
+//     assert(dim == 16);
 
-    int bx = blockIdx.x;
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int bdy = blockDim.y;
+//     int bx = blockIdx.x;
+//     int tx = threadIdx.x;
+//     int ty = threadIdx.y;
+//     int bdy = blockDim.y;
 
-    if (bx >= v_num) return;
+//     if (bx >= v_num) return;
 
-    __shared__ char shared_mem[3 * 16 * sizeof (double)];
-    double *shared_out_X = (double*) shared_mem;
-    shared_out_X[tx] = 0;
+//     __shared__ char shared_mem[3 * 16 * sizeof (double)];
+//     double *shared_out_X = (double*) shared_mem;
+//     shared_out_X[tx] = 0;
 
-    int *nbrs = &edges[index[bx]];
-    double *nbrs_val = &edges_val[index[bx]];
+//     int *nbrs = &edges[index[bx]];
+//     double *nbrs_val = &edges_val[index[bx]];
 
-    int degree = index[bx + 1] - index[bx];
+//     int degree = index[bx + 1] - index[bx];
 
-    __syncthreads();
+//     __syncthreads();
     
-    for (int j = ty; j < degree; j += bdy) {
-        int nbr = nbrs[j];
-        double x = in_X[nbr * dim + tx];
-        double y = nbrs_val[j];
-        atomicAdd(&(shared_out_X[tx]), x * y);
-    }
+//     for (int j = ty; j < degree; j += bdy) {
+//         int nbr = nbrs[j];
+//         double x = in_X[nbr * dim + tx];
+//         double y = nbrs_val[j];
+//         atomicAdd(&(shared_out_X[tx]), x * y);
+//     }
 
-    if (ty) {
-        return;
-    }
+//     if (ty) {
+//         return;
+//     }
 
-    __syncthreads();
+//     __syncthreads();
 
-    double *partial_max_val = (double*) (shared_mem + dim * sizeof (double));
-    partial_max_val[tx] = shared_out_X[tx];
+//     double *partial_max_val = (double*) (shared_mem + dim * sizeof (double));
+//     partial_max_val[tx] = shared_out_X[tx];
 
-    for (int stride = dim / 2; stride > 0; stride /= 2) {
-        if (tx < stride) {
-            partial_max_val[tx] = max(partial_max_val[tx], partial_max_val[tx + stride]);
-        }
+//     for (int stride = dim / 2; stride > 0; stride /= 2) {
+//         if (tx < stride) {
+//             partial_max_val[tx] = max(partial_max_val[tx], partial_max_val[tx + stride]);
+//         }
 
-        __syncthreads();
-    }
+//         __syncthreads();
+//     }
 
-    double max_val = partial_max_val[0];
+//     double max_val = partial_max_val[0];
 
-    double *partial_sum = (double*) (shared_mem + 2 * dim * sizeof (double));
-    partial_sum[tx] = exp(shared_out_X[tx] - max_val);
+//     double *partial_sum = (double*) (shared_mem + 2 * dim * sizeof (double));
+//     partial_sum[tx] = exp(shared_out_X[tx] - max_val);
 
-    __syncthreads();
+//     __syncthreads();
 
-    for (int stride = dim / 2; stride > 0; stride /= 2) {
-        if (tx < stride) {
-            partial_sum[tx] += partial_sum[tx + stride];
-        }
+//     for (int stride = dim / 2; stride > 0; stride /= 2) {
+//         if (tx < stride) {
+//             partial_sum[tx] += partial_sum[tx + stride];
+//         }
 
-        __syncthreads();
-    }
+//         __syncthreads();
+//     }
 
-    double sum = partial_sum[0];
-    sum = log(sum);
+//     double sum = partial_sum[0];
+//     sum = log(sum);
 
-    shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
+//     shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
 
-    // 将共享内存的数据写回全局内存
-    out_X[dim * bx + tx] = shared_out_X[tx];
-}
+//     // 将共享内存的数据写回全局内存
+//     out_X[dim * bx + tx] = shared_out_X[tx];
+// }
 
-__global__ void 
-__launch_bounds__(1024)
-logSoftmax_AX_better_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num) {
-    assert(dim == 16);
+// __global__ void 
+// __launch_bounds__(1024)
+// logSoftmax_AX_better_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num) {
+//     assert(dim == 16);
 
-    int bx = blockIdx.x;
+//     int bx = blockIdx.x;
 
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int tz = threadIdx.z;
+//     int tx = threadIdx.x;
+//     int ty = threadIdx.y;
+//     int tz = threadIdx.z;
 
-    int threads_per_node = blockDim.y;
-    int nodes_per_block = blockDim.z;
+//     int threads_per_node = blockDim.y;
+//     int nodes_per_block = blockDim.z;
 
-    int vid = bx * nodes_per_block + tz;
+//     int vid = bx * nodes_per_block + tz;
 
-    if (vid >= v_num) return;
+//     if (vid >= v_num) return;
 
-    // __shared__ char shared_mem[THREADS_PER_NODE][3 * 16 * sizeof (double)];
-    extern __shared__ char shared_mem[];
+//     // __shared__ char shared_mem[THREADS_PER_NODE][3 * 16 * sizeof (double)];
+//     extern __shared__ char shared_mem[];
     
-    double *shared_out_X = (double*) (shared_mem + tz * 3 * 16 * sizeof (double));
-    if (ty == 0) {
-        shared_out_X[tx] = 0;
-    }
+//     double *shared_out_X = (double*) (shared_mem + tz * 3 * 16 * sizeof (double));
+//     if (ty == 0) {
+//         shared_out_X[tx] = 0;
+//     }
     
-    __syncthreads();
+//     __syncthreads();
 
-    int *nbrs = &edges[index[vid]];
-    double *nbrs_val = &edges_val[index[vid]];
+//     int *nbrs = &edges[index[vid]];
+//     double *nbrs_val = &edges_val[index[vid]];
 
-    int degree = index[vid + 1] - index[vid];
+//     int degree = index[vid + 1] - index[vid];
 
-    for (int j = ty; j < degree; j += threads_per_node) {
-        int nbr = nbrs[j];
-        double x = in_X[nbr * 16 + tx];
-        double y = nbrs_val[j];
-        atomicAdd(&(shared_out_X[tx]), x * y);
-    }
+//     for (int j = ty; j < degree; j += threads_per_node) {
+//         int nbr = nbrs[j];
+//         double x = in_X[nbr * 16 + tx];
+//         double y = nbrs_val[j];
+//         atomicAdd(&(shared_out_X[tx]), x * y);
+//     }
     
-    // if (ty) {
-    //     return;
-    // }
+//     // if (ty) {
+//     //     return;
+//     // }
 
-    // __syncthreads();
+//     // __syncthreads();
 
-    // double max_val = shared_out_X[tx];
-    // for (int i = 0; i < 16; i++) {
-    //     max_val = shared_out_X[i] > max_val ? shared_out_X[i] : max_val;
-    // }
+//     // double max_val = shared_out_X[tx];
+//     // for (int i = 0; i < 16; i++) {
+//     //     max_val = shared_out_X[i] > max_val ? shared_out_X[i] : max_val;
+//     // }
 
-    // __syncthreads();
+//     // __syncthreads();
 
-    // double *shared_out_X_exp = (double*) (shared_mem[tz] + 16 * sizeof (double));
+//     // double *shared_out_X_exp = (double*) (shared_mem[tz] + 16 * sizeof (double));
 
-    // shared_out_X_exp[tx] = exp(shared_out_X[tx] - max_val);
+//     // shared_out_X_exp[tx] = exp(shared_out_X[tx] - max_val);
 
-    // __syncthreads();
+//     // __syncthreads();
 
-    // double sum = 0;
-    // for (int i = 0; i < 16; i++) {
-    //     sum += shared_out_X_exp[i];
-    // }
-    // sum = log(sum);
+//     // double sum = 0;
+//     // for (int i = 0; i < 16; i++) {
+//     //     sum += shared_out_X_exp[i];
+//     // }
+//     // sum = log(sum);
     
-    // shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
+//     // shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
 
-    // out_X[16 * vid + tx] = shared_out_X[tx];
+//     // out_X[16 * vid + tx] = shared_out_X[tx];
     
-    // ==========
+//     // ==========
 
-    if (ty) {
-        return;
-    }
+//     if (ty) {
+//         return;
+//     }
 
-    __syncthreads();
+//     __syncthreads();
 
-    double *partial_max_val = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 16 * sizeof (double));
-    partial_max_val[tx] = shared_out_X[tx];
+//     double *partial_max_val = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 16 * sizeof (double));
+//     partial_max_val[tx] = shared_out_X[tx];
 
-    for (int stride = 16 / 2; stride > 0; stride /= 2) {
-        if (tx < stride) {
-            partial_max_val[tx] = max(partial_max_val[tx], partial_max_val[tx + stride]);
-        }
+//     for (int stride = 16 / 2; stride > 0; stride /= 2) {
+//         if (tx < stride) {
+//             partial_max_val[tx] = max(partial_max_val[tx], partial_max_val[tx + stride]);
+//         }
 
-        __syncthreads();
-    }
+//         __syncthreads();
+//     }
 
-    double max_val = partial_max_val[0];
+//     double max_val = partial_max_val[0];
 
-    double *partial_sum = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 2 * 16 * sizeof (double));
-    partial_sum[tx] = exp(shared_out_X[tx] - max_val);
+//     double *partial_sum = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 2 * 16 * sizeof (double));
+//     partial_sum[tx] = exp(shared_out_X[tx] - max_val);
 
-    __syncthreads();
+//     __syncthreads();
 
-    for (int stride = 16 / 2; stride > 0; stride /= 2) {
-        if (tx < stride) {
-            partial_sum[tx] += partial_sum[tx + stride];
-        }
+//     for (int stride = 16 / 2; stride > 0; stride /= 2) {
+//         if (tx < stride) {
+//             partial_sum[tx] += partial_sum[tx + stride];
+//         }
 
-        __syncthreads();
-    }
+//         __syncthreads();
+//     }
 
-    double sum = partial_sum[0];
-    sum = log(sum);
+//     double sum = partial_sum[0];
+//     sum = log(sum);
 
-    shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
+//     shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
 
-    // 将共享内存的数据写回全局内存
-    out_X[16 * vid + tx] = shared_out_X[tx];
-}
+//     // 将共享内存的数据写回全局内存
+//     out_X[16 * vid + tx] = shared_out_X[tx];
+// }
 
 __global__ void 
 __launch_bounds__(1024)
@@ -543,7 +543,7 @@ logSoftmax_AX_better_rowsum_trick_(int dim, double *in_X, double *out_X, int *in
 
     // __shared__ char shared_mem[THREADS_PER_NODE][3 * 16 * sizeof (double)];
     extern __shared__ char shared_mem[];
-    
+
     double *shared_out_X = (double*) (shared_mem + tz * 3 * 16 * sizeof (double));
     if (ty == 0) {
         shared_out_X[tx] = 0;
@@ -556,11 +556,26 @@ logSoftmax_AX_better_rowsum_trick_(int dim, double *in_X, double *out_X, int *in
 
     int degree = index[vid + 1] - index[vid];
 
+    double *temp = (double *) (shared_mem + nodes_per_block * 3 * 16 * sizeof (double) + ((tz * threads_per_node + ty) * 16) * sizeof (double));
+
+    temp[tx] = 0;
+
     for (int j = ty; j < degree; j += threads_per_node) {
         int nbr = nbrs[j];
         double x = in_X[nbr * 16 + tx];
         double y = nbrs_val[j];
-        atomicAdd(&(shared_out_X[tx]), x * y);
+        // atomicAdd(&(shared_out_X[tx]), x * y);
+        temp[tx] += x * y;
+    }
+
+    __syncthreads();
+
+    // atomicAdd(&(shared_out_X[tx]), temp);
+
+    if (ty == 0) {
+        for (int i = 0; i < threads_per_node; i++) {
+            shared_out_X[tx] += temp[tx + 16 * i];
+        }
     }
     
     // if (ty) {
@@ -633,12 +648,16 @@ logSoftmax_AX_better_rowsum_trick_(int dim, double *in_X, double *out_X, int *in
 
     __syncthreads();
 
-    if (tx == 0) {
-        sum = 0;
-        for (int i = 0; i < 16; i++) {
-            sum += shared_out_X[i];
+    for (int stride = 16 / 2; stride > 0; stride /= 2) {
+        if (tx < stride) {
+            shared_out_X[tx] += shared_out_X[tx + stride];
         }
-        out_X[vid] = sum;
+
+        __syncthreads();
+    }
+
+    if (tx == 0) {
+        out_X[vid] = shared_out_X[0];
     }
 }
 
@@ -775,18 +794,19 @@ double GCN()
 
     // threads_per_node = 16;
 
-    // nodes_per_block = 1024 / 16 / threads_per_node;
-    if (avg_edge_per_node > 10 ) {
-        nodes_per_block = 4;
-    // } else if (avg_edge_per_node > 7) {
-    //     nodes_per_block = 1;
-    } else {
-        nodes_per_block = 2;
-    }
+    nodes_per_block = 1024 / 16 / threads_per_node;
+
+    // if (avg_edge_per_node > 10 ) {
+    //     nodes_per_block = 4;
+    // // } else if (avg_edge_per_node > 7) {
+    // //     nodes_per_block = 1;
+    // } else {
+    //     nodes_per_block = 2;
+    // }
     
     // logSoftmax_AX_better_<<<(v_num + nodes_per_block - 1) / nodes_per_block, dim3(16, threads_per_node, nodes_per_block), nodes_per_block * 3 * 16 * sizeof (double)>>>(16, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
 
-    logSoftmax_AX_better_rowsum_trick_<<<(v_num + nodes_per_block - 1) / nodes_per_block, dim3(16, threads_per_node, nodes_per_block), nodes_per_block * 3 * 16 * sizeof (double)>>>(16, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
+    logSoftmax_AX_better_rowsum_trick_<<<(v_num + nodes_per_block - 1) / nodes_per_block, dim3(16, threads_per_node, nodes_per_block), nodes_per_block * 3 * 16 * sizeof (double) + nodes_per_block * threads_per_node * 16 * sizeof (double)>>>(16, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
 
 
     for (int i = 0; i < v_num; i++) {
@@ -820,11 +840,11 @@ double GCN()
     // std::chrono::duration<double, std::milli> duration = postprocess_end - postprocess_start;
     // printf("%lf\n", duration.count());
 
-    // cudaError_t error = cudaGetLastError();
-    // if (error != cudaSuccess)
-    // {
-    //     fprintf(stderr, "CUDA Error: %s\n", cudaGetErrorString(error));
-    // }
+    cudaError_t error = cudaGetLastError();
+    if (error != cudaSuccess)
+    {
+        fprintf(stderr, "CUDA Error: %s\n", cudaGetErrorString(error));
+    }
 
     // cudaDeviceProp prop;
     // cudaGetDeviceProperties(&prop, 0);
@@ -1029,5 +1049,5 @@ int main(int argc, char **argv)
 
     printf("%f\n", ave_timeMs / ROUNDs);
 
-    // freedoubles();
+    freedoubles();
 }
