@@ -154,8 +154,9 @@ XW_blockized_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, i
     int col = bx * TILE_WIDTH + tx;
 
     double tmp = 0.0;
+    int num_phases = (in_dim + TILE_WIDTH - 1) / TILE_WIDTH;
 
-    for (int ph = 0; ph < ceil((double)in_dim / TILE_WIDTH); ++ph) {
+    for (int ph = 0; ph < num_phases; ++ph) {
         if (row < v_num && ph * TILE_WIDTH + tx < in_dim) {
             ds_A[ty][tx] = in_X[row * in_dim + ph * TILE_WIDTH + tx];
         } else {
@@ -170,8 +171,10 @@ XW_blockized_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, i
 
         __syncthreads();
 
-        for (int k = 0; k < TILE_WIDTH; k++) {
-            tmp += ds_A[ty][k] * ds_B[k][tx];
+        if (row < v_num && col < out_dim) {
+            for (int k = 0; k < TILE_WIDTH; k++) {
+                tmp += ds_A[ty][k] * ds_B[k][tx];
+            }
         }
 
         __syncthreads();
@@ -202,10 +205,11 @@ XW_blockized_better_(int in_dim, int out_dim, double *in_X, double *out_X, doubl
     int col = bx * TILE_WIDTH + tx;
 
     double tmp = 0.0;
+    int num_phases = (in_dim + TILE_WIDTH - 1) / TILE_WIDTH;
 
-    for (int ph = 0; ph <= (in_dim + TILE_WIDTH - 1) / TILE_WIDTH; ph++) {
+    for (int ph = 0; ph <= num_phases; ph++) {
         if (tz == 1) {
-            if (ph < (in_dim + TILE_WIDTH - 1) / TILE_WIDTH) {
+            if (ph < num_phases) {
                 int sgn = ph & 1;
 
                 if (row < v_num && ph * TILE_WIDTH + tx < in_dim) {
@@ -751,6 +755,39 @@ void initGPUMemory()
     cudaMemcpy(d_edges_val, edges_value, e_num * sizeof(double), cudaMemcpyHostToDevice);
 }
 
+__global__ void find_max_in_block(double *a, double *mx, int v_num) {
+    extern __shared__ char shared[];
+    double *shared_vals = (double*)shared;
+
+    int tid = threadIdx.x;
+    int bid = blockIdx.x;
+    int bdim = blockDim.x;
+    int i = bid * bdim + tid;
+
+    // 初始化共享内存
+    if (i < v_num) {
+        shared_vals[tid] = a[i];
+    } else {
+        shared_vals[tid] = -__FLT_MAX__;
+    }
+    __syncthreads();
+
+    // 使用并行归约求最大值及其索引
+    for (int stride = bdim / 2; stride > 0; stride /= 2) {
+        if (tid < stride) {
+            if (shared_vals[tid + stride] > shared_vals[tid]) {
+                shared_vals[tid] = shared_vals[tid + stride];
+            }
+        }
+        __syncthreads();
+    }
+
+    // 将结果写入全局内存
+    if (tid == 0) {
+        mx[bid] = shared_vals[0];
+    }
+}
+
 double GCN()
 {
     cudaMemset(d_X1_inter, 0, v_num * F1 * sizeof(double));
@@ -806,6 +843,11 @@ double GCN()
 
     logSoftmax_AX_better_rowsum_trick_<<<(v_num + nodes_per_block - 1) / nodes_per_block, dim3(16, threads_per_node, nodes_per_block), nodes_per_block * 3 * 16 * sizeof (double) + nodes_per_block * threads_per_node * 16 * sizeof (double)>>>(16, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
 
+    int block_size= 256;
+    int grid_size = (v_num + block_size - 1) / block_size;
+
+    find_max_in_block<<<grid_size, block_size, block_size * sizeof (double)>>>(d_X1, d_X1 + v_num, v_num);
+
 
     for (int i = 0; i < v_num; i++) {
         for (int j = 0; j < 16; j++) {
@@ -813,23 +855,21 @@ double GCN()
         }
     }
 
-    static double *temp = new double[v_num];
+    static double *mx = new double[grid_size];
 
-    cudaMemcpy(temp, d_X1, sizeof (double) * v_num, cudaMemcpyDeviceToHost);
+    cudaMemcpy(mx, d_X1 + v_num, grid_size * sizeof (double), cudaMemcpyDeviceToHost);
 
     // // 开始计时
     // auto postprocess_start = std::chrono::high_resolution_clock::now();
 
-    double mx = -__FLT_MAX__;
-    int idx = 0;
+    double val = -__FLT_MAX__;
     
-    for (int i = 0; i < v_num; i++) {
-        if (temp[i] > mx) {
-            mx = temp[i];
-            idx = i;
+    for (int i = 0; i < grid_size; i++) {
+        if (mx[i] > val) {
+            val = mx[i];
         }
     }
-    X1[16 * idx] = mx;
+    X1[0] = val;
 
     // // 结束计时
     // auto postprocess_end = std::chrono::high_resolution_clock::now();
