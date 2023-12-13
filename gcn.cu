@@ -185,60 +185,63 @@ XW_blockized_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, i
     }
 }
 
-// #define TILES_PER_BLOCK 1
+// #define TILES_PER_BLOCK 2
 
-// __global__ void
-// __launch_bounds__(1024)
-// XW_blockized_better_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, int v_num) {
+__global__ void
+__launch_bounds__(1024)
+XW_blockized_better_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, int v_num) {
     
-//     assert(out_dim == 16);
+    assert(out_dim == 16);
     
-//     __shared__ double ds_A[TILES_PER_BLOCK][TILE_WIDTH][TILE_WIDTH];
-//     __shared__ double ds_B[TILES_PER_BLOCK][TILE_WIDTH][TILE_WIDTH];
+    __shared__ double ds_A[2][TILE_WIDTH][TILE_WIDTH];
+    __shared__ double ds_B[2][TILE_WIDTH][TILE_WIDTH];
 
-//     int bx = blockIdx.x, by = blockIdx.y;
-//     int tx = threadIdx.x, ty = threadIdx.y;
-//     int tz = threadIdx.z;
+    int bx = blockIdx.x, by = blockIdx.y;
+    int tx = threadIdx.x, ty = threadIdx.y;
+    int tz = threadIdx.z;
 
-//     int row = by * TILE_WIDTH + ty;
-//     int col = bx * TILE_WIDTH + tx;
+    int row = by * TILE_WIDTH + ty;
+    int col = bx * TILE_WIDTH + tx;
 
-//     double tmp = 0.0;
+    double tmp = 0.0;
 
-//     for (int ph = tz; ph < (in_dim + TILE_WIDTH - 1) / TILE_WIDTH; ph += TILES_PER_BLOCK) {
-//         if (row < v_num && ph * TILE_WIDTH + tx < in_dim) {
-//             ds_A[tz][ty][tx] = in_X[row * in_dim + ph * TILE_WIDTH + tx];
-//         } else {
-//             ds_A[tz][ty][tx] = 0.0;
-//         }
+    for (int ph = 0; ph <= (in_dim + TILE_WIDTH - 1) / TILE_WIDTH; ph++) {
+        if (tz == 1) {
+            if (ph < (in_dim + TILE_WIDTH - 1) / TILE_WIDTH) {
+                int sgn = ph & 1;
 
-//         if (ph * TILE_WIDTH + ty < in_dim && col < out_dim) {
-//             ds_B[tz][ty][tx] = W[(ph * TILE_WIDTH + ty) * out_dim + col];
-//         } else {
-//             ds_B[tz][ty][tx] = 0.0;
-//         }
+                if (row < v_num && ph * TILE_WIDTH + tx < in_dim) {
+                    ds_A[sgn][ty][tx] = in_X[row * in_dim + ph * TILE_WIDTH + tx];
+                } else {
+                    ds_A[sgn][ty][tx] = 0.0;
+                }
 
-//         __syncthreads();
+                if (ph * TILE_WIDTH + ty < in_dim && col < out_dim) {
+                    ds_B[sgn][ty][tx] = W[(ph * TILE_WIDTH + ty) * out_dim + col];
+                } else {
+                    ds_B[sgn][ty][tx] = 0.0;
+                }
+            }
+        }
 
-//         for (int k = 0; k < TILE_WIDTH; k++) {
-//             tmp += ds_A[tz][ty][k] * ds_B[tz][k][tx];
-//         }
+        if (tz == 0) {
+            if (ph > 0) {
+                int sgn = (ph - 1) & 1;
 
-//         __syncthreads();
-//     }
+                #pragma unroll
+                for (int k = 0; k < TILE_WIDTH; k++) {
+                    tmp += ds_A[sgn][ty][k] * ds_B[sgn][k][tx];
+                }
+            }
+        }
 
-//     __shared__ double ds_O[TILE_WIDTH][TILE_WIDTH];
-//     ds_O[ty][tx] = 0;
-//     __syncthreads();
+        __syncthreads();
+    }
 
-//     atomicAdd(&(ds_O[ty][tx]), tmp);
-
-//     __syncthreads();
-
-//     if (row < v_num && col < out_dim && tz == 0) {
-//         out_X[row * out_dim + col] = ds_O[ty][tx];
-//     }
-// }
+    if (row < v_num && col < out_dim && tz == 0) {
+        out_X[row * out_dim + col] = tmp;
+    }
+}
 
 // #define OFFSET(row, col, ld) ((row) * (ld) + (col))
 
@@ -568,14 +571,16 @@ logSoftmax_AX_better_rowsum_trick_(int dim, double *in_X, double *out_X, int *in
         temp[tx] += x * y;
     }
 
+    if (ty) {
+        return;
+    }
+
     __syncthreads();
 
     // atomicAdd(&(shared_out_X[tx]), temp);
 
-    if (ty == 0) {
-        for (int i = 0; i < threads_per_node; i++) {
-            shared_out_X[tx] += temp[tx + 16 * i];
-        }
+    for (int i = 0; i < threads_per_node; i++) {
+        shared_out_X[tx] += temp[tx + 16 * i];
     }
     
     // if (ty) {
@@ -608,10 +613,6 @@ logSoftmax_AX_better_rowsum_trick_(int dim, double *in_X, double *out_X, int *in
     // out_X[16 * vid + tx] = shared_out_X[tx];
     
     // ==========
-
-    if (ty) {
-        return;
-    }
 
     __syncthreads();
 
@@ -768,9 +769,9 @@ double GCN()
 
     // XW_<<<grid_size, block_size>>>(F0, F1, d_X0, d_X1_inter, d_W1, v_num);
     
-    XW_blockized_<<<dim3((16 + TILE_WIDTH - 1) / TILE_WIDTH, (v_num + TILE_WIDTH - 1) / TILE_WIDTH), dim3(TILE_WIDTH, TILE_WIDTH)>>>(F0, 16, d_X0, d_X1_inter, d_W1, v_num);
+    // XW_blockized_<<<dim3((16 + TILE_WIDTH - 1) / TILE_WIDTH, (v_num + TILE_WIDTH - 1) / TILE_WIDTH), dim3(TILE_WIDTH, TILE_WIDTH)>>>(F0, 16, d_X0, d_X1_inter, d_W1, v_num);
 
-    // XW_blockized_better_<<<dim3((16 + TILE_WIDTH - 1) / TILE_WIDTH, (v_num + TILE_WIDTH - 1) / TILE_WIDTH), dim3(TILE_WIDTH, TILE_WIDTH, TILES_PER_BLOCK)>>>(F0, 16, d_X0, d_X1_inter, d_W1, v_num);
+    XW_blockized_better_<<<dim3((16 + TILE_WIDTH - 1) / TILE_WIDTH, (v_num + TILE_WIDTH - 1) / TILE_WIDTH), dim3(TILE_WIDTH, TILE_WIDTH, 2)>>>(F0, 16, d_X0, d_X1_inter, d_W1, v_num);
 
     // AX_<<<grid_size, block_size>>>(F1, d_X1_inter, d_X1, d_index, d_edges, d_edges_val, v_num);
     // cudaMemcpy(X1, d_X1, sizeof(double) * v_num * F1, cudaMemcpyDeviceToHost);
@@ -1022,6 +1023,8 @@ int main(int argc, char **argv)
 
     double max_sum = 0, ave_timeMs = 0;
     int ROUNDs = 5;
+
+    GCN();
 
     for (int i = 0; i < ROUNDs; i++)
     {
