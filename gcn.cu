@@ -753,15 +753,14 @@ void initGPUMemory()
 
 double GCN()
 {
-    assert(F1 == 16);
-
-
-    // cudaMemset(d_X1_inter, 0, v_num * F1 * sizeof(double));
-    // cudaMemset(d_X1, 0, F1 * v_num * sizeof(double));
+    cudaMemset(d_X1_inter, 0, v_num * F1 * sizeof(double));
+    cudaMemset(d_X1, 0, F1 * v_num * sizeof(double));
 
     TimePoint start = chrono::steady_clock::now();
 
     // ==========
+    assert(F1 == 16);
+
     // const int block_size = 512;
     // const int grid_size = v_num / block_size + 1;
 
@@ -1020,8 +1019,9 @@ int main(int argc, char **argv)
     initGPUMemory();
 
     double max_sum = 0, ave_timeMs = 0;
-    int ROUNDs = 5;
+    int ROUNDs = 20;
 
+    // warm up
     GCN();
 
     for (int i = 0; i < ROUNDs; i++)
