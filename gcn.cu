@@ -118,26 +118,26 @@ void initdouble(double *&dst, int num)
     memset(dst, 0, num * sizeof(double));
 }
 
-// __global__ void XW_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, int v_num)
-// {
+__global__ void XW_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, int v_num)
+{
 
-//     int tid = threadIdx.x + blockIdx.x * blockDim.x; // 控制v_vum
+    int tid = threadIdx.x + blockIdx.x * blockDim.x; // 控制v_vum
 
-//     if (tid >= v_num)
-//         return;
+    if (tid >= v_num)
+        return;
 
-//     double *tmp_in_X = in_X;
-//     double *tmp_out_X = out_X;
-//     double *tmp_W = W;
+    double *tmp_in_X = in_X;
+    double *tmp_out_X = out_X;
+    double *tmp_W = W;
 
-//     for (int j = 0; j < out_dim; j++)
-//     {
-//         for (int k = 0; k < in_dim; k++)
-//         {
-//             tmp_out_X[tid * out_dim + j] += tmp_in_X[tid * in_dim + k] * tmp_W[k * out_dim + j];
-//         }
-//     }
-// }
+    for (int j = 0; j < out_dim; j++)
+    {
+        for (int k = 0; k < in_dim; k++)
+        {
+            tmp_out_X[tid * out_dim + j] += tmp_in_X[tid * in_dim + k] * tmp_W[k * out_dim + j];
+        }
+    }
+}
 
 #define TILE_WIDTH 16
 
@@ -184,8 +184,6 @@ XW_blockized_(int in_dim, int out_dim, double *in_X, double *out_X, double *W, i
         out_X[row * out_dim + col] = ds_O[ty][tx];
     }
 }
-
-// #define TILES_PER_BLOCK 2
 
 __global__ void
 __launch_bounds__(1024)
@@ -323,208 +321,208 @@ XW_blockized_better_(int in_dim, int out_dim, double *in_X, double *out_X, doubl
 // }
 
 
-// __global__ void AX_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num)
-// {
+__global__ void AX_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num)
+{
 
-//     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-//     if (tid >= v_num)
-//         return;
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tid >= v_num)
+        return;
 
-//     int *nbrs = &edges[index[tid]];
-//     double *nbrs_val = &edges_val[index[tid]];
+    int *nbrs = &edges[index[tid]];
+    double *nbrs_val = &edges_val[index[tid]];
 
-//     int degree = index[tid + 1] - index[tid];
+    int degree = index[tid + 1] - index[tid];
 
-//     for (int j = 0; j < degree; j++)
-//     {
-//         int nbr = nbrs[j];
-//         for (int k = 0; k < dim; k++)
-//         {
-//             out_X[dim * tid + k] += in_X[nbr * dim + k] * nbrs_val[j];
-//         }
-//     }
-// }
+    for (int j = 0; j < degree; j++)
+    {
+        int nbr = nbrs[j];
+        for (int k = 0; k < dim; k++)
+        {
+            out_X[dim * tid + k] += in_X[nbr * dim + k] * nbrs_val[j];
+        }
+    }
+}
 
-// __global__ void logSoftmax_AX_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num) {
-//     assert(dim == 16);
+__global__ void logSoftmax_AX_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num) {
+    assert(dim == 16);
 
-//     int bx = blockIdx.x;
-//     int tx = threadIdx.x;
-//     int ty = threadIdx.y;
-//     int bdy = blockDim.y;
+    int bx = blockIdx.x;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int bdy = blockDim.y;
 
-//     if (bx >= v_num) return;
+    if (bx >= v_num) return;
 
-//     __shared__ char shared_mem[3 * 16 * sizeof (double)];
-//     double *shared_out_X = (double*) shared_mem;
-//     shared_out_X[tx] = 0;
+    __shared__ char shared_mem[3 * 16 * sizeof (double)];
+    double *shared_out_X = (double*) shared_mem;
+    shared_out_X[tx] = 0;
 
-//     int *nbrs = &edges[index[bx]];
-//     double *nbrs_val = &edges_val[index[bx]];
+    int *nbrs = &edges[index[bx]];
+    double *nbrs_val = &edges_val[index[bx]];
 
-//     int degree = index[bx + 1] - index[bx];
+    int degree = index[bx + 1] - index[bx];
 
-//     __syncthreads();
+    __syncthreads();
     
-//     for (int j = ty; j < degree; j += bdy) {
-//         int nbr = nbrs[j];
-//         double x = in_X[nbr * dim + tx];
-//         double y = nbrs_val[j];
-//         atomicAdd(&(shared_out_X[tx]), x * y);
-//     }
+    for (int j = ty; j < degree; j += bdy) {
+        int nbr = nbrs[j];
+        double x = in_X[nbr * dim + tx];
+        double y = nbrs_val[j];
+        atomicAdd(&(shared_out_X[tx]), x * y);
+    }
 
-//     if (ty) {
-//         return;
-//     }
+    if (ty) {
+        return;
+    }
 
-//     __syncthreads();
+    __syncthreads();
 
-//     double *partial_max_val = (double*) (shared_mem + dim * sizeof (double));
-//     partial_max_val[tx] = shared_out_X[tx];
+    double *partial_max_val = (double*) (shared_mem + dim * sizeof (double));
+    partial_max_val[tx] = shared_out_X[tx];
 
-//     for (int stride = dim / 2; stride > 0; stride /= 2) {
-//         if (tx < stride) {
-//             partial_max_val[tx] = max(partial_max_val[tx], partial_max_val[tx + stride]);
-//         }
+    for (int stride = dim / 2; stride > 0; stride /= 2) {
+        if (tx < stride) {
+            partial_max_val[tx] = max(partial_max_val[tx], partial_max_val[tx + stride]);
+        }
 
-//         __syncthreads();
-//     }
+        __syncthreads();
+    }
 
-//     double max_val = partial_max_val[0];
+    double max_val = partial_max_val[0];
 
-//     double *partial_sum = (double*) (shared_mem + 2 * dim * sizeof (double));
-//     partial_sum[tx] = exp(shared_out_X[tx] - max_val);
+    double *partial_sum = (double*) (shared_mem + 2 * dim * sizeof (double));
+    partial_sum[tx] = exp(shared_out_X[tx] - max_val);
 
-//     __syncthreads();
+    __syncthreads();
 
-//     for (int stride = dim / 2; stride > 0; stride /= 2) {
-//         if (tx < stride) {
-//             partial_sum[tx] += partial_sum[tx + stride];
-//         }
+    for (int stride = dim / 2; stride > 0; stride /= 2) {
+        if (tx < stride) {
+            partial_sum[tx] += partial_sum[tx + stride];
+        }
 
-//         __syncthreads();
-//     }
+        __syncthreads();
+    }
 
-//     double sum = partial_sum[0];
-//     sum = log(sum);
+    double sum = partial_sum[0];
+    sum = log(sum);
 
-//     shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
+    shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
 
-//     // 将共享内存的数据写回全局内存
-//     out_X[dim * bx + tx] = shared_out_X[tx];
-// }
+    // 将共享内存的数据写回全局内存
+    out_X[dim * bx + tx] = shared_out_X[tx];
+}
 
-// __global__ void 
-// __launch_bounds__(1024)
-// logSoftmax_AX_better_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num) {
-//     assert(dim == 16);
+__global__ void 
+__launch_bounds__(1024)
+logSoftmax_AX_better_(int dim, double *in_X, double *out_X, int *index, int *edges, double *edges_val, int v_num) {
+    assert(dim == 16);
 
-//     int bx = blockIdx.x;
+    int bx = blockIdx.x;
 
-//     int tx = threadIdx.x;
-//     int ty = threadIdx.y;
-//     int tz = threadIdx.z;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int tz = threadIdx.z;
 
-//     int threads_per_node = blockDim.y;
-//     int nodes_per_block = blockDim.z;
+    int threads_per_node = blockDim.y;
+    int nodes_per_block = blockDim.z;
 
-//     int vid = bx * nodes_per_block + tz;
+    int vid = bx * nodes_per_block + tz;
 
-//     if (vid >= v_num) return;
+    if (vid >= v_num) return;
 
-//     // __shared__ char shared_mem[THREADS_PER_NODE][3 * 16 * sizeof (double)];
-//     extern __shared__ char shared_mem[];
+    // __shared__ char shared_mem[THREADS_PER_NODE][3 * 16 * sizeof (double)];
+    extern __shared__ char shared_mem[];
     
-//     double *shared_out_X = (double*) (shared_mem + tz * 3 * 16 * sizeof (double));
-//     if (ty == 0) {
-//         shared_out_X[tx] = 0;
-//     }
+    double *shared_out_X = (double*) (shared_mem + tz * 3 * 16 * sizeof (double));
+    if (ty == 0) {
+        shared_out_X[tx] = 0;
+    }
     
-//     __syncthreads();
+    __syncthreads();
 
-//     int *nbrs = &edges[index[vid]];
-//     double *nbrs_val = &edges_val[index[vid]];
+    int *nbrs = &edges[index[vid]];
+    double *nbrs_val = &edges_val[index[vid]];
 
-//     int degree = index[vid + 1] - index[vid];
+    int degree = index[vid + 1] - index[vid];
 
-//     for (int j = ty; j < degree; j += threads_per_node) {
-//         int nbr = nbrs[j];
-//         double x = in_X[nbr * 16 + tx];
-//         double y = nbrs_val[j];
-//         atomicAdd(&(shared_out_X[tx]), x * y);
-//     }
+    for (int j = ty; j < degree; j += threads_per_node) {
+        int nbr = nbrs[j];
+        double x = in_X[nbr * 16 + tx];
+        double y = nbrs_val[j];
+        atomicAdd(&(shared_out_X[tx]), x * y);
+    }
     
-//     // if (ty) {
-//     //     return;
-//     // }
+    // if (ty) {
+    //     return;
+    // }
 
-//     // __syncthreads();
+    // __syncthreads();
 
-//     // double max_val = shared_out_X[tx];
-//     // for (int i = 0; i < 16; i++) {
-//     //     max_val = shared_out_X[i] > max_val ? shared_out_X[i] : max_val;
-//     // }
+    // double max_val = shared_out_X[tx];
+    // for (int i = 0; i < 16; i++) {
+    //     max_val = shared_out_X[i] > max_val ? shared_out_X[i] : max_val;
+    // }
 
-//     // __syncthreads();
+    // __syncthreads();
 
-//     // double *shared_out_X_exp = (double*) (shared_mem[tz] + 16 * sizeof (double));
+    // double *shared_out_X_exp = (double*) (shared_mem[tz] + 16 * sizeof (double));
 
-//     // shared_out_X_exp[tx] = exp(shared_out_X[tx] - max_val);
+    // shared_out_X_exp[tx] = exp(shared_out_X[tx] - max_val);
 
-//     // __syncthreads();
+    // __syncthreads();
 
-//     // double sum = 0;
-//     // for (int i = 0; i < 16; i++) {
-//     //     sum += shared_out_X_exp[i];
-//     // }
-//     // sum = log(sum);
+    // double sum = 0;
+    // for (int i = 0; i < 16; i++) {
+    //     sum += shared_out_X_exp[i];
+    // }
+    // sum = log(sum);
     
-//     // shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
+    // shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
 
-//     // out_X[16 * vid + tx] = shared_out_X[tx];
+    // out_X[16 * vid + tx] = shared_out_X[tx];
     
-//     // ==========
+    // ==========
 
-//     if (ty) {
-//         return;
-//     }
+    if (ty) {
+        return;
+    }
 
-//     __syncthreads();
+    __syncthreads();
 
-//     double *partial_max_val = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 16 * sizeof (double));
-//     partial_max_val[tx] = shared_out_X[tx];
+    double *partial_max_val = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 16 * sizeof (double));
+    partial_max_val[tx] = shared_out_X[tx];
 
-//     for (int stride = 16 / 2; stride > 0; stride /= 2) {
-//         if (tx < stride) {
-//             partial_max_val[tx] = max(partial_max_val[tx], partial_max_val[tx + stride]);
-//         }
+    for (int stride = 16 / 2; stride > 0; stride /= 2) {
+        if (tx < stride) {
+            partial_max_val[tx] = max(partial_max_val[tx], partial_max_val[tx + stride]);
+        }
 
-//         __syncthreads();
-//     }
+        __syncthreads();
+    }
 
-//     double max_val = partial_max_val[0];
+    double max_val = partial_max_val[0];
 
-//     double *partial_sum = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 2 * 16 * sizeof (double));
-//     partial_sum[tx] = exp(shared_out_X[tx] - max_val);
+    double *partial_sum = (double*) (shared_mem + tz * 3 * 16 * sizeof (double) + 2 * 16 * sizeof (double));
+    partial_sum[tx] = exp(shared_out_X[tx] - max_val);
 
-//     __syncthreads();
+    __syncthreads();
 
-//     for (int stride = 16 / 2; stride > 0; stride /= 2) {
-//         if (tx < stride) {
-//             partial_sum[tx] += partial_sum[tx + stride];
-//         }
+    for (int stride = 16 / 2; stride > 0; stride /= 2) {
+        if (tx < stride) {
+            partial_sum[tx] += partial_sum[tx + stride];
+        }
 
-//         __syncthreads();
-//     }
+        __syncthreads();
+    }
 
-//     double sum = partial_sum[0];
-//     sum = log(sum);
+    double sum = partial_sum[0];
+    sum = log(sum);
 
-//     shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
+    shared_out_X[tx] = shared_out_X[tx] - max_val - sum;
 
-//     // 将共享内存的数据写回全局内存
-//     out_X[16 * vid + tx] = shared_out_X[tx];
-// }
+    // 将共享内存的数据写回全局内存
+    out_X[16 * vid + tx] = shared_out_X[tx];
+}
 
 __global__ void 
 __launch_bounds__(1024)
